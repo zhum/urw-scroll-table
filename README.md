@@ -265,7 +265,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Requirements
 
 - Python 3.8+
-- urwid 2.1.2+
+- urwid 3.0.0+
 
 ## Changelog
 
@@ -275,4 +275,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Basic scrollable table functionality
 - Support for editable and dropdown cells
 - Keyboard navigation
+- Page Up/Down scrolling support
+- Sticky header functionality
+- Table value reading methods
+- Updated to support urwid 3.0.0+
 - Customizable styling
