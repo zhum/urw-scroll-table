@@ -145,9 +145,11 @@ table = UrwScrollTable(
 ### Keyboard Controls
 
 - **Arrow Keys**: Navigate between cells
-- **Enter**: Start editing the current cell
+- **Enter**: Start editing the current cell (opens popup for dropdowns)
 - **Esc**: Cancel editing
-- **Up/Down** (in dropdown): Navigate dropdown options
+- **Up/Down** (in dropdown popup): Navigate dropdown options
+- **Enter** (in dropdown popup): Select option and close popup
+- **Esc** (in dropdown popup): Cancel selection and close popup
 - **q**: Quit the application
 
 ## Examples
@@ -279,4 +281,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Sticky header functionality
 - Table value reading methods
 - Updated to support urwid 3.0.0+
+- Popup dropdown cells using urwid's PopUpLauncher with improved navigation
 - Customizable styling

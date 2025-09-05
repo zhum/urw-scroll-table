@@ -66,12 +66,18 @@ class DemoApp:
             4: 'editable',    # Notes - editable text
         }
 
+        # Define dropdown options
+        self.dropdown_options = {
+            3: ['Active', 'Inactive', 'Pending', 'Suspended']
+        }
+
         # Create the table widget
         self.table = UrwScrollTable(
             headers=self.headers,
             data=self.data,
             edit_color=self.edit_color,
             column_types=self.column_types,
+            dropdown_options=self.dropdown_options,
             colors=self.colors
         )
 
@@ -103,6 +109,8 @@ class DemoApp:
                 'editing_cell', ('black', self.edit_color)
             )),
             ('status', *self.colors.get('status', ('white', 'black'))),
+            ('popup', 'white', 'dark blue'),
+            ('popup_selected', 'yellow', 'dark blue'),
         ]
 
     def run(self):
@@ -112,7 +120,8 @@ class DemoApp:
             self.frame,
             palette=self.palette,
             unhandled_input=self._handle_input,
-            screen=urwid.display.raw.Screen()
+            screen=urwid.display.raw.Screen(),
+            pop_ups=True
         )
         # Run the loop
         loop.run()

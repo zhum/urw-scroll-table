@@ -259,3 +259,230 @@ class DropdownCell(urwid.WidgetWrap):
             return self.options[self.current_index]
         else:
             return self._original_content
+
+
+# Create a custom listbox that handles cursor keys, page up/down, Enter and Esc
+class DropdownListBox(urwid.ListBox):
+    def __init__(self, body, dropdown):
+        super().__init__(body)
+        self.dropdown = dropdown
+
+    def keypress(self, size, key):
+        if key == 'enter':
+            # Select current option
+            try:
+                focus_widget = self.get_focus()[0]
+                if hasattr(focus_widget, 'original_widget'):
+                    # Handle SelectableIcon wrapped in AttrMap
+                    selectable_icon = focus_widget.original_widget
+                    if hasattr(selectable_icon, 'text'):
+                        option_text = selectable_icon.text.strip()
+                        # Clean up markers
+                        if option_text.startswith('▶'):
+                            option_text = option_text[2:].strip()
+                        elif option_text.startswith('  '):
+                            option_text = option_text[2:].strip()
+
+                        # Find the option index
+                        try:
+                            option_index = (
+                                self.dropdown.options.index(option_text)
+                            )
+                            self.dropdown._select_option(
+                                option_index, option_text
+                            )
+                        except ValueError:
+                            pass
+            except Exception:
+                pass
+            return None
+        elif key == 'esc':
+            # Cancel selection
+            self.dropdown.close_pop_up()
+            return None
+        else:
+            # Handle navigation (up/down arrow keys)
+            return super().keypress(size, key)
+
+
+class PopupDropdownCell(urwid.PopUpLauncher):
+    """A dropdown cell widget using urwid's popup functionality."""
+
+    def __init__(self, content="", options=None, on_change=None):
+        """
+        Initialize popup dropdown cell.
+
+        Args:
+            content: Current selected value
+            options: List of available options
+            on_change: Callback function when selection changes
+        """
+        self.options = options or []
+        self.on_change = on_change
+        self._original_content = content
+        self.current_index = self._get_index_for_content(content)
+
+        # Create the main text widget showing current selection
+        self.text_widget = urwid.Text(self._get_display_text())
+
+        # Initialize the PopUpLauncher with our text widget
+        super().__init__(self.text_widget)
+
+    def _get_index_for_content(self, content):
+        """Get the index for the given content."""
+        try:
+            return self.options.index(content)
+        except ValueError:
+            return 0 if self.options else -1
+
+    def _get_display_text(self):
+        """Get the display text for the current selection."""
+        if self.options and 0 <= self.current_index < len(self.options):
+            return self.options[self.current_index] + " ▼"
+        else:
+            return self._original_content + " ▼"
+
+    def create_pop_up(self):
+        """Create the popup list widget."""
+        if not self.options:
+            # Return empty popup if no options
+            empty_text = urwid.Text("No options available")
+            return urwid.AttrMap(empty_text, 'popup')
+
+        # Create selectable widgets for each option
+        widgets = []
+        for i, option in enumerate(self.options):
+            if i == self.current_index:
+                # Use SelectableIcon for the current selection
+                widget = urwid.SelectableIcon(f"▶ {option}", cursor_position=0)
+                widget = urwid.AttrMap(widget, 'popup_selected')
+            else:
+                # Use SelectableIcon for other options
+                widget = urwid.SelectableIcon(f"  {option}", cursor_position=0)
+                widget = urwid.AttrMap(widget, 'popup')
+            widgets.append(widget)
+
+        # Create listbox with the widgets
+        listbox = DropdownListBox(urwid.SimpleFocusListWalker(widgets), self)
+
+        # Set focus to current selection
+        if 0 <= self.current_index < len(widgets):
+            listbox.set_focus(self.current_index)
+
+        # Return the listbox directly - let urwid handle the keypress events
+        return listbox
+
+    def get_pop_up_parameters(self):
+        """Get parameters for popup positioning."""
+        # Calculate popup size based on options
+        max_width = (
+            max(len(opt) for opt in self.options) if self.options else 10
+        )
+        popup_width = min(max_width + 4, 30)  # Add padding, cap at 30
+        popup_height = max(len(self.options), 1)  # At least 1 row
+
+        return {
+            'left': 0,
+            'top': 1,
+            'overlay_width': popup_width,
+            'overlay_height': popup_height
+        }
+
+    def _select_option(self, option_index, option_value):
+        """Select an option and close the popup."""
+        self._original_content = option_value
+        self.current_index = option_index
+        self.text_widget.set_text(self._get_display_text())
+
+        # Call the change callback if provided
+        if self.on_change:
+            self.on_change(option_value)
+
+        # Close the popup
+        self.close_pop_up()
+
+    def _option_selected(self, button):
+        """Handle option selection from popup."""
+        if hasattr(button, '_option_value'):
+            self._original_content = button._option_value
+            self.current_index = button._option_index
+            self.text_widget.set_text(self._get_display_text())
+
+            # Call the change callback if provided
+            if self.on_change:
+                self.on_change(button._option_value)
+
+            # Close the popup
+            self.close_pop_up()
+
+    def selectable(self):
+        """Return True to indicate this widget can receive focus."""
+        return True
+
+    def keypress(self, size, key):
+        """Handle keypress events."""
+        
+        # If popup is open, handle navigation keys
+        if hasattr(self, '_pop_up_widget') and self._pop_up_widget:
+            if key in ['up', 'down', 'page up', 'page down']:
+                # Delegate to the popup's listbox
+                popup_widget = self._pop_up_widget
+                if hasattr(popup_widget, 'keypress'):
+                    result = popup_widget.keypress(size, key)
+                    if result is None:
+                        return None
+                return key
+            elif key == 'enter':
+                # Handle selection in popup
+                popup_widget = self._pop_up_widget
+                if hasattr(popup_widget, 'keypress'):
+                    result = popup_widget.keypress(size, key)
+                    return result
+                return None
+            elif key == 'esc':
+                # Close popup
+                self.close_pop_up()
+                return None
+
+        # Handle normal cell keypress events
+        if key == 'enter':
+            # Open popup
+            self.open_pop_up()
+            return None
+        elif key == 'esc':
+            # Cancel - restore original content
+            self.current_index = self._get_index_for_content(
+                self._original_content
+            )
+            self.text_widget.set_text(self._get_display_text())
+            return None
+        else:
+            # Let parent handle other keys
+            return super().keypress(size, key)
+
+    def render(self, size, focus=False):
+        """Override render to handle size parameter correctly."""
+        if isinstance(size, tuple) and len(size) > 1:
+            # If we get a tuple with multiple values, use only the first one
+            size = (size[0],)
+        return super().render(size, focus)
+
+    def rows(self, size, focus=False):
+        """Override rows to handle size parameter correctly."""
+        if isinstance(size, tuple) and len(size) > 1:
+            # Use only the width for calculating rows
+            size = (size[0],)
+
+        # Always return 1 row - compact display
+        return 1
+
+    def pack(self, size, focus=False):
+        """Pack the widget."""
+        # Ensure size is a single value for width
+        if isinstance(size, tuple) and len(size) > 1:
+            size = (size[0],)
+        return super().pack(size, focus)
+
+    def get_edit_text(self):
+        """Get the current selected value."""
+        return self._original_content

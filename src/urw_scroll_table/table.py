@@ -9,7 +9,7 @@ import urwid
 from .widgets import (
     SingleLineText,
     EditableCell,
-    DropdownCell,
+    PopupDropdownCell,
 )
 
 
@@ -17,7 +17,8 @@ class UrwScrollTable(urwid.WidgetWrap):
     """A scrollable table widget with editable cells."""
 
     def __init__(self, headers, data, max_width=80, max_height=20,
-                 edit_color='yellow', column_types=None, colors=None):
+                 edit_color='yellow', column_types=None, colors=None,
+                 dropdown_options=None):
         """
         Initialize the scrollable editable table widget.
 
@@ -30,6 +31,8 @@ class UrwScrollTable(urwid.WidgetWrap):
             column_types: List of column types ('text', 'editable', 'dropdown')
                          or dict mapping column indices to types
             colors: Dictionary of custom colors for various table elements
+            dropdown_options: Dictionary mapping column indices to lists of
+                               options
         """
         self.headers = headers
         self.data = data
@@ -46,6 +49,9 @@ class UrwScrollTable(urwid.WidgetWrap):
 
         # Process column types
         self.column_types = self._process_column_types(column_types)
+
+        # Process dropdown options
+        self.dropdown_options = dropdown_options or {}
 
         # Colors dictionary with keys: header_fg, header_bg, cell_fg, cell_bg,
         # active_cell_fg, active_cell_bg, editing_cell_fg, editing_cell_bg
@@ -70,9 +76,10 @@ class UrwScrollTable(urwid.WidgetWrap):
         """Create the main widget that combines header and listbox."""
         # Create a custom widget that handles header and listbox
         class TableWithHeader(urwid.WidgetWrap):
-            def __init__(self, header_widget, listbox):
+            def __init__(self, header_widget, listbox, table):
                 self.header_widget = header_widget
                 self.listbox = listbox
+                self.table = table
                 super().__init__(self.listbox)
 
             def render(self, size, focus=False):
@@ -92,26 +99,22 @@ class UrwScrollTable(urwid.WidgetWrap):
                 # Render listbox
                 listbox_canvas = self.listbox.render(data_size, focus)
 
-                # Combine canvases
-                combined_canvas = urwid.CanvasCombine([
-                    (header_canvas, 0, 0),  # canvas, x, y
-                    (listbox_canvas, 0, 1)   # canvas, x, y
-                ])
+                # Combine canvases - ensure proper format
+                canvas_info = []
+                if header_canvas:
+                    canvas_info.append((header_canvas, 0, 0))
+                if listbox_canvas:
+                    canvas_info.append((listbox_canvas, 0, 1))
+
+                combined_canvas = urwid.CanvasCombine(canvas_info)
 
                 return combined_canvas
 
             def keypress(self, size, key):
-                # Pass keypress to listbox
-                if isinstance(size, tuple) and len(size) > 1:
-                    width, height = size
-                    listbox_size = (width, height - 1)
-                else:
-                    width = size
-                    listbox_size = (width, 20)  # Default height
+                # Delegate keypress to the main table
+                return self.table.keypress(size, key)
 
-                return self.listbox.keypress(listbox_size, key)
-
-        return TableWithHeader(self.header_widget, self.listbox)
+        return TableWithHeader(self.header_widget, self.listbox, self)
 
     def _calculate_column_widths(self):
         """Calculate the width needed for each column."""
@@ -182,8 +185,11 @@ class UrwScrollTable(urwid.WidgetWrap):
 
     def _get_dropdown_options(self, col_idx):
         """Get dropdown options for a specific column."""
-        # This is a simple implementation - you can customize this
-        # based on your needs
+        # Check if options are provided in dropdown_options
+        if col_idx in self.dropdown_options:
+            return self.dropdown_options[col_idx]
+
+        # Fallback to default options for backward compatibility
         if col_idx == 2:  # Department column
             return ['Engineering Department', 'Marketing Department',
                     'Sales Department', 'Human Resources',
@@ -261,17 +267,13 @@ class UrwScrollTable(urwid.WidgetWrap):
                     if column_type == 'dropdown':
                         # Create dropdown widget
                         options = self._get_dropdown_options(col_idx)
-                        edit_widget = DropdownCell(
+                        edit_widget = PopupDropdownCell(
                             content=cell_data,
                             options=options,
                             on_change=lambda text: self._on_cell_change(
                                 row_idx, col_idx, text
                             )
                         )
-                        # Set dropdown to expanded state so it
-                        # can respond to up/down keys
-                        edit_widget.expanded = True
-                        edit_widget._update_display()
                     elif column_type == 'editable':
                         # Create editable text widget
                         edit_widget = EditableCell(
@@ -331,37 +333,67 @@ class UrwScrollTable(urwid.WidgetWrap):
                 column_type = self.column_types.get(col_idx, 'text')
 
                 if column_type == 'dropdown':
-                    # Show current selection
-                    if isinstance(cell_data, list) and cell_data:
-                        cell_text = str(cell_data[0])
+                    # Create PopupDropdownCell for dropdown columns
+                    options = self._get_dropdown_options(col_idx)
+
+                    class CellCallback:
+                        def __init__(self, table, row, col):
+                            self.table = table
+                            self.row = row
+                            self.col = col
+
+                        def __call__(self, text):
+                            self.table._on_cell_change(
+                                self.row,
+                                self.col,
+                                text)
+
+                    dropdown_widget = PopupDropdownCell(
+                        content=str(cell_data),
+                        options=options,
+                        on_change=CellCallback(self, row_idx, col_idx)
+                    )
+                    row_parts.append(dropdown_widget)
+                else:
+                    # Handle text-based columns
+                    if column_type == 'editable':
+                        cell_text = str(cell_data)
                     else:
                         cell_text = str(cell_data)
-                elif column_type == 'editable':
-                    # Show current text
-                    cell_text = str(cell_data)
-                else:
-                    # Show text data
-                    cell_text = str(cell_data)
 
-                # Truncate to fit column width
-                cell_text = cell_text[:self.column_widths[col_idx]]
-                cell_width = self.column_widths[col_idx]
-                cell_text = cell_text.ljust(cell_width + 2)
+                    # Truncate to fit column width
+                    cell_text = cell_text[:self.column_widths[col_idx]]
+                    cell_width = self.column_widths[col_idx]
+                    cell_text = cell_text.ljust(cell_width + 2)
 
-                # Check if this cell should be highlighted
-                if (row_idx == self.current_row and
-                        col_idx == self.current_col):
-                    # Highlight the current cell
-                    row_parts.append(('selected', cell_text))
-                else:
-                    # Normal cell
-                    row_parts.append(cell_text)
+                    # Create text widget for urwid.Columns
+                    if (row_idx == self.current_row and
+                            col_idx == self.current_col):
+                        # Highlight the current cell
+                        text_widget = urwid.AttrMap(
+                            urwid.Text(cell_text), 'selected'
+                        )
+                    else:
+                        # Normal cell
+                        text_widget = urwid.Text(cell_text)
+
+                    row_parts.append(text_widget)
             else:
+                # Empty cell - create text widget
                 cell_width = self.column_widths[col_idx]
-                row_parts.append(" " * (cell_width + 2))
+                empty_text = " " * (cell_width + 2)
+                empty_widget = urwid.Text(empty_text)
+                row_parts.append(empty_widget)
 
-        # Create the row widget with cell highlighting
-        row_widget = urwid.Text(row_parts)
+        # Create the row widget
+        if any(isinstance(part, PopupDropdownCell) for part in row_parts):
+            # Mixed content - use urwid.Columns for layout
+            row_widget = urwid.Columns(row_parts, dividechars=0)
+        else:
+            # All text - use simple text widget
+            row_text = "".join(row_parts)
+            row_widget = SingleLineText(row_text)
+
         self.table_widgets.append(row_widget)
 
     def _get_half_page_size(self):
@@ -450,6 +482,10 @@ class UrwScrollTable(urwid.WidgetWrap):
             self.editing = False
             self._update_display()
 
+    def selectable(self):
+        """Return True to indicate this widget can receive focus."""
+        return True
+
     def keypress(self, size, key):
         """Handle keypress events."""
         # Handle all keypress events ourselves since we have a custom structure
@@ -486,24 +522,6 @@ class UrwScrollTable(urwid.WidgetWrap):
                 if cell_key in self.edit_widgets:
                     edit_widget = self.edit_widgets[cell_key]
 
-                    # Special handling for dropdown widgets that are
-                    # expanded
-                    if (
-                        hasattr(edit_widget, 'expanded') and
-                        edit_widget.expanded and
-                        key in ('up', 'down')
-                    ):
-                        # Route up/down keys directly to expanded dropdown
-                        if isinstance(size, tuple):
-                            edit_size = (size[0],)
-                        else:
-                            edit_size = (size,)
-                        result = edit_widget.keypress(edit_size, key)
-                        if result is None:
-                            # Key was handled by the dropdown
-                            return None
-                        return result
-
                     # Extract width from size tuple for edit widgets
                     edit_size = (
                         (size[0],) if isinstance(size, tuple) else (size,)
@@ -519,11 +537,38 @@ class UrwScrollTable(urwid.WidgetWrap):
                     self._update_display()
                     return None
         else:
+            # Check if a dropdown popup is open and
+            # delegate keypress events to it
+            dropdown_widget = self._get_current_dropdown_widget()
+            if dropdown_widget \
+               and hasattr(dropdown_widget, '_pop_up_widget') \
+               and dropdown_widget._pop_up_widget:
+                # Popup is open, delegate keypress events
+                # to the dropdown widget
+                result = dropdown_widget.keypress(size, key)
+                if result is None:
+                    return None
+                # If the popup handled the key, we're done
+                if key in \
+                   ['up', 'down', 'page up', 'page down', 'enter', 'esc']:
+                    return None
+
             # Normal navigation mode
             if key == 'enter':
-                # Start editing the current cell
-                self._start_editing_current_cell()
-                return None
+                # Check if current cell is a dropdown
+                column_type = self.column_types.get(self.current_col, 'text')
+                if column_type == 'dropdown':
+                    # For dropdown cells, we need to delegate
+                    # to the PopupDropdownCell widget
+                    # Since we can't easily access the widget directly,
+                    # we'll trigger the popup by simulating
+                    # the widget's behavior
+                    self._trigger_dropdown_popup()
+                    return None
+                else:
+                    # Start editing the current cell
+                    self._start_editing_current_cell()
+                    return None
             elif key == 'up':
                 if self.current_row > 0:
                     self.current_row -= 1
@@ -582,6 +627,31 @@ class UrwScrollTable(urwid.WidgetWrap):
 
         return key
 
+    def _get_current_dropdown_widget(self):
+        """Get the dropdown widget for the current cell."""
+        # Find the PopupDropdownCell widget for the current cell
+        # The widget is in the listbox at the current row
+        if self.current_row < len(self.table_widgets):
+            row_widget = self.table_widgets[self.current_row]
+
+            # If the row widget is a Columns widget, find the dropdown cell
+            if hasattr(row_widget, 'contents'):
+                # This is a urwid.Columns widget
+                for i, (widget, options) in enumerate(row_widget.contents):
+                    if i == self.current_col:
+                        # This is the current column
+                        if hasattr(widget, 'open_pop_up'):
+                            # This is a PopupDropdownCell
+                            return widget
+                        break
+        return None
+
+    def _trigger_dropdown_popup(self):
+        """Trigger popup for dropdown cell at current position."""
+        dropdown_widget = self._get_current_dropdown_widget()
+        if dropdown_widget:
+            dropdown_widget.open_pop_up()
+
     def _start_editing_current_cell(self):
         """Start editing the current cell."""
         if self.current_row >= len(self.data):
@@ -614,7 +684,7 @@ class UrwScrollTable(urwid.WidgetWrap):
         if column_type == 'dropdown':
             # Create dropdown widget
             options = self._get_dropdown_options(self.current_col)
-            edit_widget = DropdownCell(
+            edit_widget = PopupDropdownCell(
                 content=cell_data,
                 options=options,
                 on_change=lambda text: self._on_cell_change(
