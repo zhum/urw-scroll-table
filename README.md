@@ -16,8 +16,14 @@ A scrollable and editable table widget for urwid terminal applications.
 This package uses Poetry for dependency management. To install:
 
 ```bash
+pip install urw-scroll-table
+```
+
+or manually:
+
+```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/zhum/urw-scroll-table.git
 cd urw-scroll-table
 
 # Install dependencies
@@ -203,10 +209,13 @@ The main table widget class.
 ### Widget Classes
 
 - `SafeText`: Text widget with safe size parameter handling
-- `SingleLineText`: Single-line text widget
-- `HeightEnforcer`: Widget wrapper that enforces single-row height
 - `EditableCell`: Editable text cell widget
 - `DropdownCell`: Dropdown selection cell widget
+
+Supplimental classes
+
+- `SingleLineText`: Single-line text widget
+- `HeightEnforcer`: Widget wrapper that enforces single-row height
 
 ### Reading Table Data
 
@@ -268,18 +277,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Python 3.8+
 - urwid 3.0.0+
-
-## Changelog
-
-### 0.1.0
-
-- Initial release
-- Basic scrollable table functionality
-- Support for editable and dropdown cells
-- Keyboard navigation
-- Page Up/Down scrolling support
-- Sticky header functionality
-- Table value reading methods
-- Updated to support urwid 3.0.0+
-- Popup dropdown cells using urwid's PopUpLauncher with improved navigation
-- Customizable styling

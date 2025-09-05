@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "urw-scroll-table"
-version = "0.1.1"
+version = "0.1.2"
 description = "A scrollable and editable table widget for urwid terminal applications"
 authors = ["Sergey Zhumatiy <sergzhum@gmail.com>"]
 readme = "README.md"
@@ -16,6 +16,9 @@ pytest-cov = "^4.0.0"
 black = "^23.0.0"
 flake8 = "^6.0.0"
 mypy = "^1.0.0"
+
+[project.urls]
+Homepage = "https://github.com/zhum/urw-scroll-table"
 
 [build-system]
 requires = ["poetry-core"]

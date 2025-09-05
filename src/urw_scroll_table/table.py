@@ -215,16 +215,37 @@ class UrwScrollTable(urwid.WidgetWrap):
 
         # Create header row (always visible)
         if visible_cols:
-            header_text = ""
-            for col_idx in visible_cols:
-                header = self.headers[col_idx]
-                header_width = self.column_widths[col_idx]
-                header_text += header[:header_width].ljust(header_width + 2)
-
-            self.header_widget = urwid.AttrMap(
-                SingleLineText(header_text),
-                'header'
+            # Check if any visible columns are dropdowns
+            has_dropdown = any(
+                self.column_types.get(col_idx) == 'dropdown'
+                for col_idx in visible_cols
             )
+
+            if has_dropdown:
+                # Use urwid.Columns for consistency with dropdown rows
+                header_parts = []
+                for col_idx in visible_cols:
+                    header = self.headers[col_idx]
+                    header_width = self.column_widths[col_idx]
+                    header_text = header[:header_width].ljust(header_width + 2)
+                    header_parts.append(urwid.Text(header_text))
+
+                self.header_widget = urwid.AttrMap(
+                    urwid.Columns(header_parts, dividechars=0),
+                    'header'
+                )
+            else:
+                # Use single text widget for text-only columns
+                header_text = ""
+                for col_idx in visible_cols:
+                    header = self.headers[col_idx]
+                    header_width = self.column_widths[col_idx]
+                    header_text += header[:header_width].ljust(header_width + 2)  # noqa: E501
+
+                self.header_widget = urwid.AttrMap(
+                    SingleLineText(header_text),
+                    'header'
+                )
 
         # Create data rows (only visible ones)
         # -1 for header
@@ -351,8 +372,16 @@ class UrwScrollTable(urwid.WidgetWrap):
                     dropdown_widget = PopupDropdownCell(
                         content=str(cell_data),
                         options=options,
-                        on_change=CellCallback(self, row_idx, col_idx)
+                        on_change=CellCallback(self, row_idx, col_idx),
+                        max_width=self.column_widths[col_idx] + 2
                     )
+
+                    # Apply highlighting if this is the current cell
+                    if (row_idx == self.current_row and col_idx == self.current_col):  # noqa: E501
+                        dropdown_widget = urwid.AttrMap(
+                            dropdown_widget,
+                            'selected')
+
                     row_parts.append(dropdown_widget)
                 else:
                     # Handle text-based columns
@@ -386,12 +415,28 @@ class UrwScrollTable(urwid.WidgetWrap):
                 row_parts.append(empty_widget)
 
         # Create the row widget
-        if any(isinstance(part, PopupDropdownCell) for part in row_parts):
+        has_dropdown = any(
+            isinstance(part, PopupDropdownCell) or
+            (hasattr(part, 'original_widget') and isinstance(part.original_widget, PopupDropdownCell))  # noqa: E501
+            for part in row_parts
+        )
+        if has_dropdown:
             # Mixed content - use urwid.Columns for layout
             row_widget = urwid.Columns(row_parts, dividechars=0)
         else:
-            # All text - use simple text widget
-            row_text = "".join(row_parts)
+            # All text - extract text content from widgets
+            row_text_parts = []
+            for part in row_parts:
+                if hasattr(part, 'text'):
+                    # urwid.Text widget
+                    row_text_parts.append(part.text)
+                elif hasattr(part, 'original_widget') and hasattr(part.original_widget, 'text'):  # noqa: E501
+                    # urwid.AttrMap wrapping urwid.Text
+                    row_text_parts.append(part.original_widget.text)
+                else:
+                    # Fallback - convert to string
+                    row_text_parts.append(str(part))
+            row_text = "".join(row_text_parts)
             row_widget = SingleLineText(row_text)
 
         self.table_widgets.append(row_widget)
@@ -631,19 +676,32 @@ class UrwScrollTable(urwid.WidgetWrap):
         """Get the dropdown widget for the current cell."""
         # Find the PopupDropdownCell widget for the current cell
         # The widget is in the listbox at the current row
-        if self.current_row < len(self.table_widgets):
-            row_widget = self.table_widgets[self.current_row]
+
+        # Calculate the table widget index for the current row
+        # table_widgets[i] corresponds to data row (vertical_offset + i)
+        table_widget_index = self.current_row - self.vertical_offset
+
+        if 0 <= table_widget_index < len(self.table_widgets):
+            row_widget = self.table_widgets[table_widget_index]
 
             # If the row widget is a Columns widget, find the dropdown cell
             if hasattr(row_widget, 'contents'):
                 # This is a urwid.Columns widget
-                for i, (widget, options) in enumerate(row_widget.contents):
-                    if i == self.current_col:
-                        # This is the current column
+                # We need to find the visible column index for current_col
+                visible_cols = self._get_visible_columns(self.max_width or 80)
+                try:
+                    visible_col_index = visible_cols.index(self.current_col)
+                    if visible_col_index < len(row_widget.contents):
+                        widget, options = row_widget.contents[visible_col_index]  # noqa: E501
                         if hasattr(widget, 'open_pop_up'):
                             # This is a PopupDropdownCell
                             return widget
-                        break
+                        elif hasattr(widget, 'original_widget') and hasattr(widget.original_widget, 'open_pop_up'):  # noqa: E501
+                            # This is a PopupDropdownCell wrapped in AttrMap
+                            return widget.original_widget
+                except ValueError:
+                    # current_col is not in visible columns
+                    pass
         return None
 
     def _trigger_dropdown_popup(self):

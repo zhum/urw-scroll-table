@@ -115,14 +115,15 @@ class DemoApp:
 
     def run(self):
         """Run the application."""
-        # Create the main loop
+        # Create the main loop - use table directly instead of frame
         loop = urwid.MainLoop(
-            self.frame,
+            self.frame,  # Use table directly instead of frame
             palette=self.palette,
             unhandled_input=self._handle_input,
             screen=urwid.display.raw.Screen(),
             pop_ups=True
         )
+
         # Run the loop
         loop.run()
 

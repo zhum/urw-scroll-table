@@ -302,13 +302,47 @@ class DropdownListBox(urwid.ListBox):
             return None
         else:
             # Handle navigation (up/down arrow keys)
-            return super().keypress(size, key)
+            result = super().keypress(size, key)
+            if result is None:
+                # Key was handled, update display to show current selection
+                self._update_selection_display()
+            return result
+
+    def _update_selection_display(self):
+        """Update the display to show current selection with ▶ marker."""
+        try:
+            focus_index = self.get_focus()[1]
+            for i, widget in enumerate(self.body):
+                if hasattr(widget, 'original_widget'):
+                    selectable_icon = widget.original_widget
+                    if hasattr(selectable_icon, 'text'):
+                        # Get the option text without markers
+                        option_text = selectable_icon.text.strip()
+                        if option_text.startswith('▶'):
+                            option_text = option_text[2:].strip()
+                        elif option_text.startswith('  '):
+                            option_text = option_text[2:].strip()
+
+                        # Update the text with proper marker
+                        if i == focus_index:
+                            selectable_icon.set_text(f"▶ {option_text}")
+                            widget.set_attr_map({None: 'popup_selected'})
+                        else:
+                            selectable_icon.set_text(f"  {option_text}")
+                            widget.set_attr_map({None: 'popup'})
+        except Exception:
+            # If there's an error updating display, just continue
+            pass
 
 
 class PopupDropdownCell(urwid.PopUpLauncher):
     """A dropdown cell widget using urwid's popup functionality."""
 
-    def __init__(self, content="", options=None, on_change=None):
+    def __init__(self,
+                 content="",
+                 options=None,
+                 on_change=None,
+                 max_width=None):
         """
         Initialize popup dropdown cell.
 
@@ -316,14 +350,16 @@ class PopupDropdownCell(urwid.PopUpLauncher):
             content: Current selected value
             options: List of available options
             on_change: Callback function when selection changes
+            max_width: Maximum width for the display text
         """
         self.options = options or []
         self.on_change = on_change
         self._original_content = content
         self.current_index = self._get_index_for_content(content)
+        self.max_width = max_width
 
         # Create the main text widget showing current selection
-        self.text_widget = urwid.Text(self._get_display_text())
+        self.text_widget = urwid.Text(self._get_display_text(max_width))
 
         # Initialize the PopUpLauncher with our text widget
         super().__init__(self.text_widget)
@@ -335,12 +371,23 @@ class PopupDropdownCell(urwid.PopUpLauncher):
         except ValueError:
             return 0 if self.options else -1
 
-    def _get_display_text(self):
+    def _get_display_text(self, max_width=None):
         """Get the display text for the current selection."""
         if self.options and 0 <= self.current_index < len(self.options):
-            return self.options[self.current_index] + " ▼"
+            text = self.options[self.current_index] + " ▼"
         else:
-            return self._original_content + " ▼"
+            text = self._original_content + " ▼"
+
+        # Truncate if max_width is specified
+        if max_width is not None and len(text) > max_width:
+            # Leave space for the ▼ symbol
+            content_width = max_width - 2
+            if content_width > 0:
+                text = text[:content_width] + " ▼"
+            else:
+                text = " ▼"
+
+        return text
 
     def create_pop_up(self):
         """Create the popup list widget."""
@@ -353,12 +400,16 @@ class PopupDropdownCell(urwid.PopUpLauncher):
         widgets = []
         for i, option in enumerate(self.options):
             if i == self.current_index:
-                # Use SelectableIcon for the current selection
-                widget = urwid.SelectableIcon(f"▶ {option}", cursor_position=0)
+                # Use SelectableIcon with cursor at end for full highlighting
+                widget = urwid.SelectableIcon(
+                    f"▶ {option}", cursor_position=len(f"▶ {option}")
+                    )
                 widget = urwid.AttrMap(widget, 'popup_selected')
             else:
                 # Use SelectableIcon for other options
-                widget = urwid.SelectableIcon(f"  {option}", cursor_position=0)
+                widget = urwid.SelectableIcon(
+                    f"  {option}", cursor_position=len(f"  {option}")
+                    )
                 widget = urwid.AttrMap(widget, 'popup')
             widgets.append(widget)
 
@@ -378,7 +429,7 @@ class PopupDropdownCell(urwid.PopUpLauncher):
         max_width = (
             max(len(opt) for opt in self.options) if self.options else 10
         )
-        popup_width = min(max_width + 4, 30)  # Add padding, cap at 30
+        popup_width = min(max_width + 6, 40)  # Add more padding, cap at 40
         popup_height = max(len(self.options), 1)  # At least 1 row
 
         return {
@@ -392,7 +443,7 @@ class PopupDropdownCell(urwid.PopUpLauncher):
         """Select an option and close the popup."""
         self._original_content = option_value
         self.current_index = option_index
-        self.text_widget.set_text(self._get_display_text())
+        self.text_widget.set_text(self._get_display_text(self.max_width))
 
         # Call the change callback if provided
         if self.on_change:
@@ -421,7 +472,7 @@ class PopupDropdownCell(urwid.PopUpLauncher):
 
     def keypress(self, size, key):
         """Handle keypress events."""
-        
+
         # If popup is open, handle navigation keys
         if hasattr(self, '_pop_up_widget') and self._pop_up_widget:
             if key in ['up', 'down', 'page up', 'page down']:
@@ -454,7 +505,7 @@ class PopupDropdownCell(urwid.PopUpLauncher):
             self.current_index = self._get_index_for_content(
                 self._original_content
             )
-            self.text_widget.set_text(self._get_display_text())
+            self.text_widget.set_text(self._get_display_text(self.max_width))
             return None
         else:
             # Let parent handle other keys
